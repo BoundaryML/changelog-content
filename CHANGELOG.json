@@ -1,0 +1,365 @@
+{
+  "releases": [
+    {
+      "version": "0.11.0-alpha.4340",
+      "slug": "v0-11-0-alpha-4340",
+      "date": "2026-05-28",
+      "title": "Editor config tweak",
+      "lede": "This alpha is a single change to .vscode/settings.json that hides snap files from workspace search. No runtime impact.",
+      "authors": [
+        "sxlijin"
+      ],
+      "highlights": [
+        "VS Code search now ignores snap files"
+      ],
+      "breaking": [],
+      "content": [
+        {
+          "type": "p",
+          "text": "A quiet release. The only change is a developer-environment tweak: VS Code is now configured to exclude snap files from search results, which keeps grep noise down when working in the BAML repo."
+        }
+      ]
+    },
+    {
+      "version": "0.11.0-alpha.4335",
+      "slug": "v0-11-0-alpha-4335",
+      "date": "2026-05-28",
+      "title": "bigint and let...else",
+      "lede": "Arbitrary-precision integers land as a built-in primitive, and refutable let bindings get a diverging else clause so you can destructure on the happy path without an extra match.",
+      "authors": [
+        "2kai2kai2",
+        "codeshaunted",
+        "sxlijin"
+      ],
+      "highlights": [
+        "New `bigint` primitive with `n`-suffixed literals and two's complement bitwise semantics",
+        "`let ... else` for refutable patterns with a diverging else branch",
+        "Python SDK now surfaces BAML errors and panics as structured exceptions",
+        "`baml pack` envelope rewritten on native borsh, dropping bitcode and serde from the packaged graph"
+      ],
+      "breaking": [],
+      "content": [
+        {
+          "type": "h3",
+          "text": "bigint"
+        },
+        {
+          "type": "p",
+          "text": "`bigint` is an arbitrary-precision signed integer, immutable and heap-allocated like `string`. Literals use the `n` suffix, matching the convention from JavaScript and Python-adjacent languages."
+        },
+        {
+          "type": "code",
+          "lang": "baml",
+          "code": "let small: bigint = 123n;\nlet huge: bigint = 9999999999999999999999999n;\n\n// int widens into bigint inside a binary op\nlet mixed: bigint = 1n + 2;  // 3n",
+          "caption": null,
+          "filename": null,
+          "diff": false
+        },
+        {
+          "type": "p",
+          "text": "Widening from `int` is implicit only in binary operations, so the rest of the type system keeps narrow integers narrow. Operations that can blow up (left shift, multiplication) panic with `AllocFailure` if the result would exceed about 33.6MB (1 << 28 bits), so a runaway `1n << (1n << 29n)` is a recoverable BAML panic instead of an OOM crash."
+        },
+        {
+          "type": "h3",
+          "text": "let ... else"
+        },
+        {
+          "type": "p",
+          "text": "A `let` binding can now take a refutable pattern paired with an `else` branch that must diverge. On a match, the bindings flow into the enclosing scope. On a miss, the else branch runs and the rest of the function is unreachable."
+        },
+        {
+          "type": "code",
+          "lang": "baml",
+          "code": "let User { name } = u else { return; };\n// name is bound here",
+          "caption": null,
+          "filename": null,
+          "diff": false
+        },
+        {
+          "type": "p",
+          "text": "The else branch must have type `Never`, which means a `return`, `throw`, `break`, `continue`, or an infinite loop. If your pattern is irrefutable, the compiler warns and tells you to drop the else (E0112). Refutability reuses the same matrix as `if let`, so coverage diagnostics stay consistent."
+        },
+        {
+          "type": "code",
+          "lang": "baml",
+          "code": "let Some(token) = lookup(id) else {\n  throw NotFound { key: id };\n};\n\nlet [first, ..rest] = items else {\n  return [];\n};",
+          "caption": null,
+          "filename": null,
+          "diff": false
+        },
+        {
+          "type": "h3",
+          "text": "Python SDK error propagation"
+        },
+        {
+          "type": "p",
+          "text": "Python -> BAML calls now return errors through the bridge in a logical way per BEP-56. BAML throws and panics arrive as structured Python exceptions with BAML stack frames preserved, and generated docstrings include inferred `Raises:` information so editors can pick it up."
+        },
+        {
+          "type": "code",
+          "lang": "diff",
+          "code": "  from baml_client import b\n  from baml_client.errors import NotFound\n  \n  try:\n      user = b.LookupUser(id=\"u_123\")\n- except Exception as e:\n-     # opaque message, no BAML frames\n-     print(e)\n+ except NotFound as e:\n+     # structured payload, BAML stack frames intact\n+     print(e.key, e.__traceback__)",
+          "caption": null,
+          "filename": null,
+          "diff": true
+        },
+        {
+          "type": "h3",
+          "text": "Smaller packed binaries"
+        },
+        {
+          "type": "p",
+          "text": "`baml pack` previously embedded the program graph as bitcode in serde mode, which dragged the bitcode crate and serde derives onto roughly sixty types (Program, Object, Value, Bytecode, Ty, and friends). The envelope is now native borsh, and `Serialize` / `Deserialize` are gone from the entire Program graph. Custom impls for `Value`, `Object`, `FunctionKind`, `HeapPtr`, `Future`, and `UnscheduledFuture` were rewritten on borsh with the same semantics."
+        },
+        {
+          "type": "h3",
+          "text": "CI and test infra"
+        },
+        {
+          "type": "list",
+          "items": [
+            "More `baml_tests` cases run through the native BAML test harness, snapshotted per namespace to avoid repeated startup overhead.",
+            "Fixed a cache-eviction bug where PR branches were knocking out the canary cache on the 25GB blacksmith runners, forcing cache misses across Linux and Windows.",
+            "Cargo timings artifacts are now labelled by job instead of timestamp.",
+            "`bridge_wasm` size-gate raised from 3.6MB to 3.8MB gzip to track baseline growth."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.11.0-alpha.4281",
+      "slug": "v0-11-0-alpha-4281",
+      "date": "2026-05-27",
+      "title": "if let, host values, and a spawn-safe runtime",
+      "lede": "0.11.0-alpha.4281 adds refutable pattern binding in condition position, lets host code pass closures into BAML as first-class values, and closes three data races in spawn.",
+      "authors": [
+        "sxlijin",
+        "2kai2kai2",
+        "antoniosarosi",
+        "hellovai",
+        "codeshaunted"
+      ],
+      "highlights": [
+        "`if let` expressions with pattern binding, narrowing, and `else if let` chaining",
+        "Host values: pass closures or other opaque host objects into BAML through a lifetime-managed handle",
+        "`spawn` is now crash-safe across `Value` writes, container mutation, and field/cell slots",
+        "MIR emits `copy` and `init_spread` to skip temporary `store_var`/`load_var` round trips",
+        "baml-cli `__TEXT` segment is ~160 KiB smaller after trimming unused cargo features"
+      ],
+      "breaking": [],
+      "content": [
+        {
+          "type": "h3",
+          "text": "`if let` expressions"
+        },
+        {
+          "type": "p",
+          "text": "You can now bind in condition position. The then-branch sees the matched type with pattern bindings in scope, and the else-branch sees the residual. `else if let` chains as you would expect."
+        },
+        {
+          "type": "code",
+          "lang": "baml",
+          "code": "- let label = match u {\n-   User { name } => name,\n-   _ => \"no match\",\n- }\n+ let label = if let User { name } = u {\n+   name\n+ } else {\n+   \"no match\"\n+ }",
+          "caption": null,
+          "filename": "match.baml",
+          "diff": true
+        },
+        {
+          "type": "p",
+          "text": "`if let` is a distinct AST node, not a desugaring of `match`, which keeps diagnostics and LSP behavior clean. A new warning, E0112 `IrrefutablePatternInIfLet`, fires when the pattern cannot fail and the construct collapses to a plain `let`."
+        },
+        {
+          "type": "h3",
+          "text": "Host values"
+        },
+        {
+          "type": "p",
+          "text": "BAML already let the host hold opaque handles to BAML values. This release adds the inverse. A host language can pass a non-serializable value, such as a closure or a function pointer, into a code-generated BAML function. BAML receives an opaque handle, can pass it around, store it in fields, and call it as if it were a normal BAML function. The bridge tracks references and only releases the value back to the host once BAML has dropped its last one."
+        },
+        {
+          "type": "p",
+          "text": "This is the missing half for host-owned callbacks: retry policies driven by host code, tool dispatch routed through a host registry, anything where the value cannot leave the host process."
+        },
+        {
+          "type": "h3",
+          "text": "`spawn` is crash-safe"
+        },
+        {
+          "type": "p",
+          "text": "Three changes close the data races that BEP-034 `spawn` introduced. First, `Value` is now a packed 8-byte tagged pointer (`repr(transparent) struct Value(u64)`) instead of a 16-byte enum, so a Value write is a single store and racing writers cannot tear `(tag, payload)` apart. Second, `Object::Array` and `Object::Map` mutation goes through a per-container spin-lock (`LazyBiasedMutex`), so concurrent `array.push`, `arr[i] = ...`, and `map.set` no longer SIGABRT inside `Vec`'s debug assertions. Third, `Instance.fields` and captured `Cell.value` are `AtomicValueSlot`, with GC tracing, JSON, deep-copy, the debugger, and codegen accessors all routed through the slot API."
+        },
+        {
+          "type": "callout",
+          "text": "This is a Rust data-race and crash-safety fix. Compound user operations like `value += 1` or `arr[i] = arr[i] + 1` are still logical races and can interleave. The runtime will not corrupt or crash.",
+          "metric": null
+        },
+        {
+          "type": "code",
+          "lang": "baml",
+          "code": "let arr = [];\nspawn { for (let i = 0; i < 1000; i += 1) { arr.push(i); }; 0 };\nspawn { for (let i = 0; i < 1000; i += 1) { arr.push(i); }; 0 };\nawait ...",
+          "caption": "On the previous alpha this crashed with exit 134. It now completes.",
+          "filename": null,
+          "diff": false
+        },
+        {
+          "type": "h3",
+          "text": "Smaller bytecode, smaller CLI"
+        },
+        {
+          "type": "p",
+          "text": "MIR stackification gained two instructions, `copy <depth>` and `init_spread <field_copy_set>`, that let common temporaries ride the VM stack instead of round-tripping through `store_var` / `load_var`. Compound field and index stores, stack-carried operands, and object spreads are all shorter as a result."
+        },
+        {
+          "type": "p",
+          "text": "Separately, baml-cli drops unused cargo features (`tower-http/cors`, `reqwest/json` and `blocking`, `parking_lot/deadlock_detection`, `clap/env`, tokio `fs` in the LSP) and dedupes `tokio-tungstenite` against the copy axum already pulls in. The release binary's `__TEXT` segment shrinks from 13,451,264 to 13,287,424 bytes."
+        },
+        {
+          "type": "h3",
+          "text": "Standard library"
+        },
+        {
+          "type": "p",
+          "text": "`baml_std` picks up a new `ns_host` namespace for host-value support, plus additions to `int`, `float`, and `ns_errors`. The describe-command snapshot reflects the new package listing."
+        }
+      ]
+    },
+    {
+      "version": "0.11.0-alpha.4166",
+      "slug": "v0-11-0-alpha-4166",
+      "date": "2026-05-22",
+      "title": "Remove @assert and @check",
+      "lede": "Constraint attributes are gone. BAML no longer parses, validates, or enforces @assert or @check on types, fields, or parameters.",
+      "authors": [
+        "2kai2kai2"
+      ],
+      "highlights": [
+        "@assert and @check attributes removed from the language",
+        "Constraint expressions (and their Jinja validation) no longer parsed",
+        "Deserializer no longer runs assertion checks during coercion",
+        "Simplified type system focused on core streaming"
+      ],
+      "breaking": [
+        {
+          "title": "@assert and @check attributes are no longer supported",
+          "summary": "Any class field, function parameter, or type alias that carries @assert or @check will fail to parse. The constraint runtime, the SAP assertion model, and the Jinja expression validator backing these attributes have all been removed. This affects every project that used field-level or block-level constraints to validate LLM output.",
+          "before": "class Resume {\n  email string @assert(valid_email, {{ this|regex_match(\".+@.+\") }})\n  age int @check(adult, {{ this >= 18 }})\n}",
+          "after": "class Resume {\n  email string\n  age int\n}",
+          "migration": "Search your .baml files for @assert and @check and delete the attributes along with their Jinja expressions. Move the validation into your application code after the BAML call returns, or into a follow-up BAML function. Remove any reads of Checked<T> / assertion metadata from generated client code.",
+          "severity": "high"
+        }
+      ],
+      "content": [
+        {
+          "type": "p",
+          "text": "@assert and @check are removed. The parser no longer accepts them, the type system no longer carries constraint metadata, and the deserializer no longer evaluates Jinja expressions to enforce them."
+        },
+        {
+          "type": "p",
+          "text": "These attributes let you attach a predicate to a field and either fail the call (@assert) or surface a soft-fail flag (@check) when the model returned something that did not satisfy it. In practice the feature added a Jinja evaluator to the hot path of every coercion, a separate constraint model alongside the type model, and a class of errors that were hard to act on at the call site. Validation that needs to fail loudly belongs in your application code, where you can decide what to do about it."
+        },
+        {
+          "type": "code",
+          "lang": "baml",
+          "code": "  class Resume {\n-   email string @assert(valid_email, {{ this|regex_match(\"^[^@]+@[^@]+$\") }})\n-   age int @check(adult, {{ this >= 18 }})\n+   email string\n+   age int\n  }",
+          "caption": null,
+          "filename": "resume.baml",
+          "diff": true
+        },
+        {
+          "type": "h3",
+          "text": "What was removed"
+        },
+        {
+          "type": "list",
+          "items": [
+            "Parser support for @assert and @check on classes, fields, type aliases, and function parameters",
+            "The constraint attribute model in baml_base and baml_type",
+            "Jinja expression validation in baml_lsp2_actions/check.rs (454 lines)",
+            "SAP assertion model and the deserialize_flags constraint plumbing in bex_sap",
+            "simplify_sap constraint handling and the simplify_sap_tests cases for it"
+          ]
+        },
+        {
+          "type": "h3",
+          "text": "Migration"
+        },
+        {
+          "type": "p",
+          "text": "Strip @assert and @check from your schemas. If you depended on them for guardrails, validate after the function returns. A typical pattern:"
+        },
+        {
+          "type": "code",
+          "lang": "py",
+          "code": "resume = await b.ExtractResume(text)\nif \"@\" not in resume.email:\n    raise ValueError(\"model returned a non-email\")\nif resume.age < 18:\n    raise ValueError(\"under 18\")",
+          "caption": null,
+          "filename": "main.py",
+          "diff": false
+        },
+        {
+          "type": "callout",
+          "text": "Constraints were alpha-only and never reached a stable release. If you were relying on them, pin to 0.11.0-alpha.4157 while you migrate.",
+          "metric": null
+        }
+      ]
+    },
+    {
+      "version": "0.11.0-alpha.4157",
+      "slug": "v0-11-0-alpha-4157",
+      "date": "2026-05-22",
+      "title": "ARM Linux, musl, and Arch packages",
+      "lede": "The baml CLI now ships prebuilt binaries for ARM Linux and musl, plus Arch packages via the AUR.",
+      "authors": [
+        "codeshaunted"
+      ],
+      "highlights": [
+        "Prebuilt binaries for aarch64-unknown-linux-gnu, x86_64-unknown-linux-musl, and aarch64-unknown-linux-musl",
+        "baml and baml-bin packages published to the AUR on every release",
+        "salsa upgraded to 0.26.2 from crates.io, picking up 55 upstream commits of cycle and correctness fixes"
+      ],
+      "breaking": [],
+      "content": [
+        {
+          "type": "p",
+          "text": "The release pipeline now produces three more Linux artifacts: ARM glibc (aarch64-unknown-linux-gnu), x86 musl, and ARM musl. ARM builds run on Blacksmith ARM runners, so they are native rather than cross-compiled. The pack command distinguishes musl from gnu in the archive name, so Alpine and other musl distros get the right binary."
+        },
+        {
+          "type": "h3",
+          "text": "Arch Linux via the AUR"
+        },
+        {
+          "type": "p",
+          "text": "Two new PKGBUILDs land in packaging/aur/. baml builds from source, baml-bin pulls the prebuilt x86_64 archive. Both are published automatically on each release."
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "code": "# binary package, no Rust toolchain needed\nyay -S baml-bin\n\n# build from source\nyay -S baml",
+          "caption": null,
+          "filename": null,
+          "diff": false
+        },
+        {
+          "type": "h3",
+          "text": "salsa 0.26.2"
+        },
+        {
+          "type": "p",
+          "text": "The incremental compilation layer moves off a pinned git rev (pre-0.25.0) and onto the published 0.26.2 release. That spans v0.25.0 through v0.26.2, with cycle-correctness fixes (#1068, #1050, #1061) and reduced monomorphization in macro output. salsa 0.26 no longer accepts &'_ T as a tracked-function argument, so format_salsa now takes FormatOptions by value. FormatOptions is two usizes and is now Copy, so callers do not need to change."
+        },
+        {
+          "type": "code",
+          "lang": "rust",
+          "code": "- fn format_salsa(db: &dyn Db, src: &str, opts: &FormatOptions) -> String\n+ fn format_salsa(db: &dyn Db, src: &str, opts: FormatOptions) -> String",
+          "caption": null,
+          "filename": null,
+          "diff": true
+        },
+        {
+          "type": "callout",
+          "text": "aarch64-pc-windows-msvc was briefly listed as an expected release target but never wired into the build matrix. It has been removed from the validator. ARM Windows is not shipping.",
+          "metric": null
+        }
+      ]
+    }
+  ]
+}

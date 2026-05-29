@@ -1,0 +1,85 @@
+{
+  "version": "0.11.0-alpha.4383",
+  "slug": "v0-11-0-alpha-4383",
+  "date": "2026-05-29",
+  "title": "Faster strings via BexStr, and a baml.time module with Instant and Duration",
+  "lede": "BAML's VM now uses BexStr, a V8-inspired string type that replaces std::string::String across the runtime. A new baml.time module ships Instant and Duration with nanosecond granularity and RFC3339 serialization.",
+  "authors": [
+    "hellovai",
+    "2kai2kai2",
+    "antoniosarosi",
+    "sxlijin"
+  ],
+  "highlights": [
+    "BexStr replaces std::string::String across the VM. Cheap clones, char-indexed string ops.",
+    "Unicode-correct substring and length. \"😀hello\".substring(0, 1) returns \"😀\".",
+    "New baml.time.Instant and baml.time.Duration with nanosecond granularity. RFC3339 canonical form.",
+    "Stale field-slot reads raise baml.panics.InvalidFieldAccess instead of crashing the VM.",
+    "Builtin definitions now require a throws clause."
+  ],
+  "breaking": [
+    {
+      "title": "Builtin definitions must declare what they throw",
+      "summary": "Every builtin in baml_std now needs a throws clause. This affects anyone authoring builtins through the baml_builtins macros or codegen; ordinary user-defined functions are unchanged.",
+      "before": "fn read_file(path: string) -> string",
+      "after": "fn read_file(path: string) throws baml.io.IoError -> string",
+      "migration": "Add `throws never` for builtins that cannot fail, or `throws <ErrorType>` naming the error you raise. The compiler will reject builtin declarations missing the clause; the entries in baml_builtins2/baml_std/baml/*.baml are the canonical reference.",
+      "severity": "low"
+    }
+  ],
+  "content": [
+    {
+      "type": "h3",
+      "text": "BexStr: faster, Unicode-correct strings"
+    },
+    {
+      "type": "p",
+      "text": "The VM used std::string::String for every BAML string, so every clone was a heap allocation plus a memcpy, map-key lookups rehashed from scratch, and concat loops were O(n^2) from repeated clone+push_str. For LLM output processing (JSON parsing, splitting, template rendering) that allocation pressure showed up everywhere."
+    },
+    {
+      "type": "p",
+      "text": "BexStr is a V8-inspired string type with cheap clone semantics. It also fixes a latent correctness bug: string operations now index by Unicode characters, not bytes. Anything that took an index or length now does the right thing on multi-byte input."
+    },
+    {
+      "type": "code",
+      "lang": "baml",
+      "code": "  let greeting = \"😀hello\"\n- let first = greeting.substring(0, 1)  // old: partial bytes of the emoji\n+ let first = greeting.substring(0, 1)  // new: \"😀\"\n- let n = greeting.length              // old: 9 (bytes)\n+ let n = greeting.length              // new: 6 (chars)",
+      "caption": "Substring and length switched from byte indexing to char indexing.",
+      "filename": null,
+      "diff": true
+    },
+    {
+      "type": "h3",
+      "text": "baml.time.Instant and baml.time.Duration"
+    },
+    {
+      "type": "p",
+      "text": "Instant is an absolute point in time with nanosecond granularity. Duration is the span between two Instants. Canonical serialization for Instant is an RFC3339 timestamp, so they round-trip cleanly through prompts and JSON. The language does not currently support operator overloading, so arithmetic is method-based for now, and Instant does not override structural-as-prompt coercion yet."
+    },
+    {
+      "type": "h3",
+      "text": "Hardened VM after the spawn-raced arithmetic work"
+    },
+    {
+      "type": "p",
+      "text": "Follow-up to the specialization changes in 0.11.0-alpha.4340. The specialized int and float arithmetic opcodes are now skipped when either operand reads a captured local or a value derived from one, which closes a class of miscompiles around spawn-raced closures. Plain non-captured arithmetic stays on the fast path."
+    },
+    {
+      "type": "p",
+      "text": "Out-of-bounds reads against a stale VM field slot now raise a catchable baml.panics.InvalidFieldAccess instead of bubbling up as a Rust panic. Bytecode and execution coverage was added for captured scalar arithmetic, captured float[] element arithmetic, and a deterministic stale field-slot access."
+    },
+    {
+      "type": "h3",
+      "text": "Smaller things"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Builtin declarations now require a throws clause. See the breaking change above.",
+        "$init_test_<file_id> identifiers are path-based instead of using an unstable index, so adding a new file no longer churns every test snapshot.",
+        "Fixed the multi-host-call test harness, which had a single slot and broke under parallel tests.",
+        "Python SDK test setup uses the project's stable venv instead of spinning up pinned build environments per run."
+      ]
+    }
+  ]
+}
